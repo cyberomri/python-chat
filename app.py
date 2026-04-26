@@ -67,6 +67,9 @@ def handle_message(data):
         "time": datetime.now().strftime("%H:%M")
     }, broadcast=True)
 
+@app.route("/")
+def home():
+    return "Chat server is running 🚀"
 
 # ---------------- RUN ----------------
 if __name__ == "__main__":
