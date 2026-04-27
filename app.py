@@ -13,7 +13,7 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
 
-# Use SQLite (simple production starter DB)
+# Database
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///chat.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -23,23 +23,36 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 bcrypt = Bcrypt(app)
 db = SQLAlchemy(app)
 
-# ---------------- DATABASE ----------------
+# ---------------- MODELS ----------------
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
 
 
+class Message(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender = db.Column(db.String(80))
+    msg = db.Column(db.Text)
+    time = db.Column(db.String(10))
+
+
 # ---------------- INIT DB ----------------
+
 @app.before_first_request
 def create_tables():
     db.create_all()
 
 
 # ---------------- AUTH ----------------
+
 @app.route("/register", methods=["POST"])
 def register():
     data = request.json
+
+    if User.query.filter_by(username=data["username"]).first():
+        return jsonify({"error": "User already exists"}), 400
 
     hashed_pw = bcrypt.generate_password_hash(data["password"]).decode("utf-8")
 
@@ -70,7 +83,8 @@ def login():
     return jsonify({"token": token})
 
 
-# ---------------- TOKEN CHECK ----------------
+# ---------------- TOKEN VERIFY ----------------
+
 def verify_token(token):
     try:
         decoded = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
@@ -80,6 +94,7 @@ def verify_token(token):
 
 
 # ---------------- SOCKET AUTH ----------------
+
 @socketio.on("connect")
 def connect():
     token = request.args.get("token")
@@ -90,19 +105,54 @@ def connect():
 
 
 # ---------------- CHAT ----------------
+
 @socketio.on("message")
 def handle_message(data):
     user = verify_token(data.get("token"))
     if not user:
         return
 
+    msg_text = data.get("msg")
+
+    message = Message(
+        sender=user,
+        msg=msg_text,
+        time=datetime.now().strftime("%H:%M")
+    )
+
+    db.session.add(message)
+    db.session.commit()
+
     emit("message", {
         "sender": user,
-        "msg": data["msg"],
-        "time": datetime.now().strftime("%H:%M")
+        "msg": msg_text,
+        "time": message.time
     }, broadcast=True)
 
 
+# ---------------- GET MESSAGES ----------------
+
+@app.route("/messages", methods=["GET"])
+def get_messages():
+    messages = Message.query.all()
+
+    return jsonify([
+        {
+            "sender": m.sender,
+            "msg": m.msg,
+            "time": m.time
+        } for m in messages
+    ])
+
+
+# ---------------- HOME ----------------
+
+@app.route("/")
+def home():
+    return "Secure Chat Server Running 🚀"
+
+
 # ---------------- RUN ----------------
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
