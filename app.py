@@ -8,16 +8,18 @@ from flask_sqlalchemy import SQLAlchemy
 import jwt
 from datetime import datetime, timedelta
 
+# ---------------- LOAD ENV ----------------
 load_dotenv()
 
 app = Flask(__name__)
 
-# ---------------- CONFIG ----------------
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
+
+# ---------------- DATABASE ----------------
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///chat.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# ---------------- INIT EXTENSIONS ----------------
+# ---------------- INIT ----------------
 CORS(app)
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
@@ -38,12 +40,12 @@ class Message(db.Model):
     time = db.Column(db.String(10))
 
 
-# ---------------- CREATE TABLES (FLASK 3 FIX) ----------------
+# ---------------- FIX FOR FLASK 3 (IMPORTANT) ----------------
 with app.app_context():
     db.create_all()
 
 
-# ---------------- AUTH ----------------
+# ---------------- REGISTER ----------------
 @app.route("/register", methods=["POST"])
 def register():
     data = request.json
@@ -51,15 +53,15 @@ def register():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    if User.query.filter_by(username=data.get("username")).first():
+    if User.query.filter_by(username=data["username"]).first():
         return jsonify({"error": "User already exists"}), 400
 
     hashed_pw = bcrypt.generate_password_hash(
-        data.get("password")
+        data["password"]
     ).decode("utf-8")
 
     user = User(
-        username=data.get("username"),
+        username=data["username"],
         password=hashed_pw
     )
 
@@ -69,13 +71,14 @@ def register():
     return jsonify({"message": "User created"}), 200
 
 
+# ---------------- LOGIN ----------------
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
 
-    user = User.query.filter_by(username=data.get("username")).first()
+    user = User.query.filter_by(username=data["username"]).first()
 
-    if not user or not bcrypt.check_password_hash(user.password, data.get("password")):
+    if not user or not bcrypt.check_password_hash(user.password, data["password"]):
         return jsonify({"error": "Invalid credentials"}), 401
 
     token = jwt.encode(
@@ -90,20 +93,16 @@ def login():
     return jsonify({"token": token})
 
 
-# ---------------- TOKEN VERIFY ----------------
+# ---------------- VERIFY TOKEN ----------------
 def verify_token(token):
     try:
-        decoded = jwt.decode(
-            token,
-            app.config["SECRET_KEY"],
-            algorithms=["HS256"]
-        )
+        decoded = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
         return decoded["user"]
     except:
         return None
 
 
-# ---------------- SOCKET AUTH ----------------
+# ---------------- SOCKET CONNECT ----------------
 @socketio.on("connect")
 def connect():
     token = request.args.get("token")
@@ -113,7 +112,7 @@ def connect():
         disconnect()
 
 
-# ---------------- CHAT ----------------
+# ---------------- CHAT MESSAGE ----------------
 @socketio.on("message")
 def handle_message(data):
     user = verify_token(data.get("token"))
@@ -153,12 +152,12 @@ def get_messages():
     ])
 
 
-# ---------------- HOME ----------------
+# ---------------- HOME ROUTE ----------------
 @app.route("/")
 def home():
     return "Secure Chat Server Running 🚀"
 
 
-# ---------------- RUN ----------------
+# ---------------- RUN SERVER ----------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
